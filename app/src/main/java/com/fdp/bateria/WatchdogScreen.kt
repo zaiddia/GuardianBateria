@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -37,6 +39,7 @@ fun WatchdogScreen() {
     var logs by remember { mutableStateOf(Prefs.logs(ctx)) }
     var unrestricted by remember { mutableStateOf(false) }
     var usage by remember { mutableStateOf(UsageRepo.hasUsagePermission(ctx)) }
+    var showHelp by remember { mutableStateOf(false) }
 
     fun refresh() {
         logs = Prefs.logs(ctx)
@@ -63,6 +66,17 @@ fun WatchdogScreen() {
             Prefs.log(ctx, "Vigilante apagado")
         }
         logs = Prefs.logs(ctx)
+    }
+
+    if (showHelp) {
+        Dialog(onDismissRequest = { showHelp = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize()) {
+                Column {
+                    TextButton(onClick = { showHelp = false }) { Text("← Volver") }
+                    PermissionHelp(onGranted = { showHelp = false; refresh() })
+                }
+            }
+        }
     }
 
     LazyColumn(
@@ -145,7 +159,7 @@ fun WatchdogScreen() {
                     )
                     Spacer(Modifier.height(8.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (!usage) FilledTonalButton(onClick = { Actions.openUsageAccess(ctx) }) { Text("Acceso al uso") }
+                        if (!usage) Button(onClick = { showHelp = true }) { Text("Conceder acceso al uso") }
                         if (!unrestricted) FilledTonalButton(onClick = {
                             try {
                                 ctx.startActivity(

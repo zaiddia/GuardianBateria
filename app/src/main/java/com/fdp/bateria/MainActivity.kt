@@ -151,17 +151,7 @@ fun AppsScreen() {
     }
 
     if (!hasPerm) {
-        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-            Text("Falta un permiso", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Para saber qué apps gastan más batería necesito ver su tiempo de uso. " +
-                        "En la pantalla que se abrirá, busca \"Guardián de Batería\" y activa " +
-                        "\"Permitir acceso al uso\". Nada sale de tu teléfono."
-            )
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { Actions.openUsageAccess(ctx) }) { Text("Conceder acceso al uso") }
-        }
+        PermissionHelp(onGranted = { hasPerm = true; reload++ })
         return
     }
 
@@ -343,6 +333,26 @@ fun AppCard(app: AppUsage) {
                                 "Shizuku + una terminal (o usa la app Hail). Son reversibles.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (ShizukuHelper.state(ctx) == ShizukuHelper.State.READY) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Shizuku está activo: hazlo con un toque.", fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = {
+                                val ok = ShizukuHelper.restrictBackground(app.pkg)
+                                Prefs.log(ctx, "${app.label}: segundo plano bloqueado con Shizuku")
+                                Actions.toast(ctx, if (ok) "${app.label} ya no puede correr en segundo plano" else "No se pudo aplicar")
+                            }) { Text("Bloquear 2º plano") }
+                            FilledTonalButton(onClick = {
+                                val ok = ShizukuHelper.freeze(app.pkg)
+                                Prefs.log(ctx, "${app.label}: congelada con Shizuku")
+                                Actions.toast(ctx, if (ok) "${app.label} congelada" else "No se pudo congelar")
+                            }) { Text("Congelar") }
+                            OutlinedButton(onClick = {
+                                ShizukuHelper.unfreeze(app.pkg)
+                                Actions.toast(ctx, "${app.label} restaurada")
+                            }) { Text("Revertir") }
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(cmds, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                 }
