@@ -129,3 +129,103 @@ object UsageRepo {
         return result.sortedByDescending { it.weight }
     }
 }
+
+/** App sospechosa de causar calor o drenaje en una ventana de tiempo concreta. */
+data class Culprit(
+    val pkg: String,
+    val label: String,
+    val fgMs: Long,          // tiempo en pantalla dentro de la ventana
+    val bgMs: Long,          // tiempo con servicio activo en segundo plano dentro de la ventana
+    val starts: Int,         // arranques de servicios ocultos
+    val inForeground: Boolean,
+) {
+    val score: Double get() = fgMs * 1.0 + bgMs * 0.8 + starts * 60_000.0
+    fun describe(): String = buildString {
+        append(label)
+        val parts = ArrayList<String>()
+        if (fgMs >= 60_000) parts += "${fmt(fgMs)} en pantalla"
+        if (bgMs >= 60_000) parts += "${fmt(bgMs)} oculta"
+        if (starts >= 3) parts += "$starts arranques"
+        if (inForeground) parts += "abierta ahora"
+        if (parts.isNotEmpty()) append(" (").append(parts.joinToString(", ")).append(")")
+    }
+}
+
+object CulpritFinder {
+
+    private fun excluded(ctx: Context): Set<String> {
+        val pm = ctx.packageManager
+        val home = try {
+            pm.resolveActivity(
+                android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .addCategory(android.content.Intent.CATEGORY_HOME), 0
+            )?.activityInfo?.packageName
+        } catch (e: Exception) { null }
+        val ime = android.provider.Settings.Secure.getString(
+            ctx.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD
+        )?.substringBefore('/')
+        return setOfNotNull(ctx.packageName, home, ime, "android", "com.android.systemui")
+    }
+
+    /**
+     * Reconstruye, a partir de los eventos del sistema, qué apps estuvieron en pantalla y cuáles
+     * mantuvieron servicios activos entre [start] y [end]. Devuelve las más pesadas primero.
+     */
+    fun find(ctx: Context, start: Long, end: Long = System.currentTimeMillis(), max: Int = 3): List<Culprit> {
+        if (!UsageRepo.hasUsagePermission(ctx)) return emptyList()
+        val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val skip = excluded(ctx)
+        // Leemos desde antes para conocer el estado (qué estaba abierto) al inicio de la ventana.
+        val scanFrom = minOf(start, end - 3 * 3_600_000L)
+
+        val resumedAt = HashMap<String, Long>()
+        val fgsOpenAt = HashMap<String, Long>()
+        val fg = HashMap<String, Long>()
+        val bg = HashMap<String, Long>()
+        val starts = HashMap<String, Int>()
+        var lastResumed: String? = null
+
+        fun addClamped(map: HashMap<String, Long>, p: String, from: Long, to: Long) {
+            val a = maxOf(from, start)
+            if (to > a) map[p] = (map[p] ?: 0L) + (to - a)
+        }
+
+        val events = usm.queryEvents(scanFrom, end)
+        val ev = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(ev)
+            val p = ev.packageName ?: continue
+            val t = ev.timeStamp
+            when (ev.eventType) {
+                1 -> { resumedAt[p] = t; lastResumed = p }                 // ACTIVITY_RESUMED
+                2, 23 -> resumedAt.remove(p)?.let { addClamped(fg, p, it, t) } // PAUSED / STOPPED
+                19 -> {                                                     // FOREGROUND_SERVICE_START
+                    if (p !in fgsOpenAt) fgsOpenAt[p] = t
+                    if (t >= start) starts[p] = (starts[p] ?: 0) + 1
+                }
+                20 -> fgsOpenAt.remove(p)?.let { addClamped(bg, p, it, t) } // FOREGROUND_SERVICE_STOP
+            }
+        }
+        resumedAt.forEach { (p, t) -> addClamped(fg, p, t, end) }
+        fgsOpenAt.forEach { (p, t) -> addClamped(bg, p, t, end) }
+
+        val pm = ctx.packageManager
+        val all = HashSet<String>().apply { addAll(fg.keys); addAll(bg.keys); addAll(starts.keys) }
+        return all.asSequence()
+            .filter { it !in skip }
+            .mapNotNull { p ->
+                val label = try {
+                    pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString()
+                } catch (e: Exception) { return@mapNotNull null }
+                Culprit(
+                    pkg = p, label = label,
+                    fgMs = fg[p] ?: 0L, bgMs = bg[p] ?: 0L, starts = starts[p] ?: 0,
+                    inForeground = p == lastResumed && p in resumedAt,
+                )
+            }
+            .filter { it.fgMs >= 2 * 60_000 || it.bgMs >= 2 * 60_000 || it.starts >= 3 || it.inForeground }
+            .sortedByDescending { it.score }
+            .take(max)
+            .toList()
+    }
+}

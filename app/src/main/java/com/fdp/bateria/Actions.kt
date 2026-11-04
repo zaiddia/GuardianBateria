@@ -119,6 +119,7 @@ object Actions {
     fun optimizationList(ctx: Context) = start(ctx, Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
     fun display(ctx: Context) = start(ctx, Intent(Settings.ACTION_DISPLAY_SETTINGS))
     fun location(ctx: Context) = start(ctx, Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+    fun security(ctx: Context) = start(ctx, Intent(Settings.ACTION_SECURITY_SETTINGS), Intent(Settings.ACTION_SETTINGS))
     fun sync(ctx: Context) = start(ctx, Intent(Settings.ACTION_SYNC_SETTINGS))
     fun wireless(ctx: Context) = start(ctx, Intent(Settings.ACTION_WIRELESS_SETTINGS))
     fun developer(ctx: Context) = start(

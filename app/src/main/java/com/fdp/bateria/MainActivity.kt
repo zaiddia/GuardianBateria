@@ -2,6 +2,7 @@ package com.fdp.bateria
 
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -16,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
@@ -41,10 +43,35 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
+    private val tab = mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { AppTheme { Root() } }
+        handle(intent)
+        setContent { AppTheme { Root(tab) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
+    /** Acciones que llegan desde los botones de las alertas. */
+    private fun handle(i: Intent?) {
+        if (i == null) return
+        i.getStringExtra("restrict_pkg")?.let {
+            Actions.appBattery(this, it, i.getStringExtra("label") ?: it)
+            i.removeExtra("restrict_pkg")
+        }
+        if (i.hasExtra("open_saver")) {
+            Actions.batterySaver(this)
+            i.removeExtra("open_saver")
+        }
+        i.getStringExtra("tab")?.toIntOrNull()?.let {
+            tab.intValue = it
+            i.removeExtra("tab")
+        }
     }
 }
 
@@ -66,12 +93,13 @@ fun AppTheme(content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Root() {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+fun Root(tabState: MutableIntState) {
+    var tab by tabState
     val tabs = listOf(
         "Apps" to Icons.AutoMirrored.Filled.List,
         "Batería" to Icons.Filled.Info,
         "Consejos" to Icons.Filled.Settings,
+        "Vigilante" to Icons.Filled.Notifications,
     )
     Scaffold(
         topBar = { TopAppBar(title = { Text("Guardián de Batería", fontWeight = FontWeight.Bold) }) },
@@ -92,7 +120,8 @@ fun Root() {
             when (tab) {
                 0 -> AppsScreen()
                 1 -> BatteryScreen()
-                else -> TipsScreen()
+                2 -> TipsScreen()
+                else -> WatchdogScreen()
             }
         }
     }
@@ -208,6 +237,7 @@ fun AppCard(app: AppUsage) {
     val ctx = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     var showAdb by remember { mutableStateOf(false) }
+    var protected by remember(app.pkg) { mutableStateOf(Prefs.isProtected(ctx, app.pkg)) }
     val barColor = when {
         app.percent >= 15f -> Danger
         app.percent >= 6f -> Amber
@@ -280,6 +310,9 @@ fun AppCard(app: AppUsage) {
                     FilledTonalButton(onClick = { Actions.forceStop(ctx, app.pkg) }) { Text("Forzar detención") }
                     OutlinedButton(onClick = { Actions.notifications(ctx, app.pkg) }) { Text("Notificaciones") }
                     OutlinedButton(onClick = { showAdb = true }) { Text("Congelar (avanzado)") }
+                    OutlinedButton(onClick = { protected = Prefs.toggleProtected(ctx, app.pkg) || Prefs.isProtected(ctx, app.pkg) }) {
+                        Text(if (protected) "🛡 Protegida" else "Proteger del vigilante")
+                    }
                     if (!app.isSystem) {
                         OutlinedButton(onClick = { Actions.uninstall(ctx, app.pkg) }) {
                             Text("Desinstalar", color = Danger)
@@ -435,6 +468,9 @@ fun TipsScreen() {
         Tip("Xiaomi: Inicio automático", "HyperOS deja que muchas apps arranquen solas. Apágalo para todo excepto WhatsApp, alarmas y lo que necesites recibir al instante.", "Inicio automático") { Actions.xiaomiAutostart(it) },
         Tip("Xiaomi: Centro de batería", "En Seguridad > Batería: usa el modo \"Equilibrado\" (no \"Rendimiento\"), activa \"Ahorro de batería\" automático y revisa qué apps marca como de alto consumo.", "Abrir batería de Xiaomi") { Actions.xiaomiBatteryCenter(it) },
         Tip("Xiaomi: Tasa de refresco", "La pantalla AMOLED a 120 Hz gasta bastante más. En Pantalla > Tasa de actualización elige 60 Hz o \"Predeterminada\" (dinámica). Apaga también la Pantalla Siempre Activa (AOD) si no la usas.", "Ajustes de pantalla") { Actions.display(it) },
+        Tip("Xiaomi: Escaneo Wi-Fi y Bluetooth", "Aunque tengas Wi-Fi y Bluetooth apagados, HyperOS sigue buscando redes y dispositivos para mejorar la ubicación. En Ubicación > Servicios de ubicación desactiva \"Búsqueda de Wi-Fi\" y \"Búsqueda de Bluetooth\".", "Ajustes de ubicación") { Actions.location(it) },
+        Tip("Xiaomi: VoLTE / 5G y señal", "Tu Redmi usa un procesador MediaTek; en algunas versiones de HyperOS el módem mantiene el teléfono despierto. Si el vigilante te avisa de gasto con la pantalla apagada sin ninguna app culpable, prueba a usar 4G en vez de 5G o desactivar VoLTE en Tarjetas SIM y redes móviles.", "Redes") { Actions.wireless(it) },
+        Tip("Xiaomi: Anuncios y recomendaciones", "Las apps del sistema (Seguridad, Archivos, Música, Temas) muestran recomendaciones que consumen datos y batería. Desactívalas en los ajustes de cada una y en Ajustes > Contraseñas y seguridad > Autorización y revocación, revoca \"msa\".", "Seguridad") { Actions.security(it) },
         Tip("Xiaomi: Carga", "Activa \"Protección de batería / Carga optimizada\" en Batería para reducir el desgaste; evita usar el modo turbo de carga si el teléfono se calienta.", "Abrir batería de Xiaomi") { Actions.xiaomiBatteryCenter(it) },
     ) else emptyList()
     val tips = xiaomiTips + listOf(
